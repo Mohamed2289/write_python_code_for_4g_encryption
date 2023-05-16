@@ -1,0 +1,76 @@
+from Crypto.Cipher import AES
+from Crypto.Hash import HMAC, SHA256
+from Crypto.Random import get_random_bytes
+from Crypto.Util.Padding import pad, unpad
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.PublicKey import ElGamal
+import hashlib
+import base64
+
+# Set up the parameters
+PASSWORD = b'supersecretpassword' # Password used for key derivation
+SALT = get_random_bytes(16) # Salt for key derivation
+IV = get_random_bytes(AES.block_size) # Initialization vector for AES-CBC encryption
+MODE = AES.MODE_CBC # Encryption mode for AES-CBC
+PLAINTEXT = b'This is a secret message.' # Plaintext to be encrypted
+
+# Generate the Diffie-Hellman key pair
+key_pair = ElGamal.generate(1024)
+
+# Convert the public key to bytes
+pub_key_bytes = key_pair.publickey().export_key()
+
+# Convert the private key to bytes and hash it using SHA-256
+priv_key_bytes = key_pair.export_key()
+priv_key_hash = hashlib.sha256(priv_key_bytes).digest()
+
+# Derive the encryption key and authentication key using PBKDF2 key derivation
+encryption_key = PBKDF2(PASSWORD, SALT, dkLen=32, count=100000, hmac_hash_module=SHA256)
+authentication_key = PBKDF2(PASSWORD, SALT, dkLen=32, count=100000, hmac_hash_module=SHA256)
+
+# Initialize the AES cipher in CBC mode with the given initialization vector and encryption key
+cipher = AES.new(encryption_key, MODE, IV)
+
+# Encrypt the plaintext using AES-CBC encryption
+padded_plaintext = pad(PLAINTEXT, AES.block_size)
+ciphertext = cipher.encrypt(padded_plaintext)
+
+# Generate the HMAC-SHA256 authentication code for the ciphertext using the authentication key
+hmac = HMAC.new(authentication_key, digestmod=SHA256)
+hmac.update(ciphertext)
+mac = hmac.digest()
+
+# Send the public key, ciphertext, MAC, and salt to the other party
+
+# Receive the public key, ciphertext, MAC, and salt from the other party
+
+# Convert the received public key to an ElGamal object
+other_pub_key = ElGamal.import_key(pub_key_bytes)
+
+# Generate the shared secret using the Diffie-Hellman key exchange
+shared_secret = key_pair.decrypt(other_pub_key.encrypt(priv_key_hash, None))
+
+# Derive the encryption key and authentication key using the shared secret and salt
+encryption_key = PBKDF2(shared_secret, SALT, dkLen=32, count=100000, hmac_hash_module=SHA256)
+authentication_key = PBKDF2(shared_secret, SALT, dkLen=32, count=100000, hmac_hash_module=SHA256)
+
+# Verify the HMAC-SHA256 authentication code for the received ciphertext using the received MAC and authentication key
+hmac = HMAC.new(authentication_key, digestmod=SHA256)
+hmac.update(ciphertext)
+if (hmac.digest() != mac):
+    print('Authentication failed')
+else:
+    # Decrypt the received ciphertext using AES-CBC decryption
+    cipher = AES.new(encryption_key, MODE, IV)
+    plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+
+    # Print the results
+    print('Plaintext:', PLAINTEXT)
+    print('Shared secret:', shared_secret)
+    print('Encryption key:', encryption_key)
+    print('Authentication key:', authentication_key)
+    print('Salt:', base64.b64encode(SALT))
+    print('IV:', base64.b64encode(IV))
+    print('Ciphertext:', base64.b64encode(ciphertext))
+    print('MAC:', base64.b64encode(mac))
+    print('Received plaintext:', plaintext)
